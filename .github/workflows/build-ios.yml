@@ -11,10 +11,9 @@ jobs:
     - name: 检出代码
       uses: actions/checkout@v4
 
-    - name: 安装 Flutter（版本 3.27.0）
+    - name: 安装最新稳定 Flutter
       uses: subosito/flutter-action@v2
       with:
-        flutter-version: '3.27.0'
         channel: 'stable'
 
     - name: 检查 Flutter 和 Dart 版本
@@ -22,38 +21,20 @@ jobs:
         flutter --version
         dart --version
 
-    - name: 禁用 Flutter Analytics
-      run: flutter config --no-analytics
-
-    - name: 清理之前的构建
+    - name: 禁用分析和获取依赖
       run: |
-        flutter clean
-        rm -rf pubspec.lock
-        rm -rf ios/Pods
-        rm -rf ios/Podfile.lock
+        flutter config --no-analytics
+        flutter pub get --offline || flutter pub get
 
-    - name: 获取依赖
-      run: flutter pub get
-
-    - name: 构建 iOS app
-      run: flutter build ios --release
-
-    - name: 构建 IPA
+    - name: 构建 iOS IPA
       run: |
-        cd ios
-        xcodebuild -workspace Runner.xcworkspace \
-          -scheme Runner \
-          -configuration Release \
-          -archivePath ../build/Runner.xcarchive \
-          clean archive
-        
-        xcodebuild -exportArchive \
-          -archivePath ../build/Runner.xcarchive \
-          -exportPath ../build/ipa \
-          -exportOptionsPlist ../ExportOptions.plist
+        flutter build ipa \
+          --release \
+          --export-method ad-hoc \
+          --no-codesign
 
     - name: 上传 IPA 文件
       uses: actions/upload-artifact@v4
       with:
         name: conduit-ipa
-        path: build/ipa/*.ipa
+        path: build/ios/ipa/*.ipa
