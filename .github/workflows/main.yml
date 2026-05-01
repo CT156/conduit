@@ -26,56 +26,53 @@ jobs:
 
       - name: Install CocoaPods via Gem
         run: |
-          # 解除 Homebrew CocoaPods
           brew uninstall --ignore-dependencies cocoapods 2>/dev/null || true
           brew cleanup 2>/dev/null || true
-
-          # 安裝獨立的 CocoaPods
           GEM_HOME_DIR="$HOME/.gem-custom"
           mkdir -p "$GEM_HOME_DIR"
           GEM_HOME=$GEM_HOME_DIR gem install cocoapods -N --no-document
-
-          # 設定環境變數
           echo "GEM_HOME=$GEM_HOME_DIR" >> $GITHUB_ENV
           echo "$GEM_HOME_DIR/bin" >> $GITHUB_PATH
 
-      # 關鍵修正：直接修正 .symlinks 中的 podspec
-      - name: Patch super_native_extensions podspec in .symlinks
+      # 解決方案：在 Podfile 中注入 pre_install hook
+      - name: Inject Podfile pre_install hook to patch podspec
         run: |
-          echo "🔍 Looking for podspec in .symlinks..."
+          PODFILE_PATH="ios/Podfile"
           
-          # 檢查 .symlinks 目錄是否存在
-          if [ -d "ios/.symlinks/plugins/super_native_extensions" ]; then
-            PODSPEC_PATH="ios/.symlinks/plugins/super_native_extensions/ios/super_native_extensions.podspec"
-            
-            if [ -f "$PODSPEC_PATH" ]; then
-              echo "✅ Found podspec at: $PODSPEC_PATH"
-              echo "📄 Before patch:"
-              grep -n "execution_position" "$PODSPEC_PATH" || echo "   (not found)"
-              
-              # 執行修正
-              sed -i '' 's/:execution_position=>/:execution_position =>/g' "$PODSPEC_PATH"
-              
-              echo "📄 After patch:"
-              grep -n "execution_position" "$PODSPEC_PATH" || echo "   (not found)"
-              echo "✅ Patch applied to .symlinks version!"
-            else
-              echo "❌ Podspec file not found at expected path"
-              echo "📂 Contents of ios/.symlinks/plugins/super_native_extensions/:"
-              ls -la ios/.symlinks/plugins/super_native_extensions/ios/ 2>/dev/null || echo "   (directory empty or missing)"
-            fi
-          else
-            echo "❌ .symlinks directory not found for super_native_extensions"
-            echo "📂 Checking ios/.symlinks/plugins/ directory:"
-            ls ios/.symlinks/plugins/ 2>/dev/null || echo "   (directory not found)"
+          # 確保 Podfile 存在
+          if [ ! -f "$PODFILE_PATH" ]; then
+            echo "❌ Podfile not found at $PODFILE_PATH"
+            exit 1
           fi
           
-          # 同時也修正 pub cache 以備不時之需
-          echo "🔄 Also applying patch to pub cache..."
-          find ~/.pub-cache -name "super_native_extensions.podspec" -exec sh -c '
-            echo "   → Patching: $1"
-            sed -i "" "s/:execution_position=>/:execution_position =>/g" "$1"
-          ' _ {} \; 2>/dev/null || echo "   (no pub cache entries found)"
+          echo "📄 Original Podfile last lines:"
+          tail -5 "$PODFILE_PATH"
+          
+          # 注入 pre_install hook - 這個 hook 會在解析 podspec 之前執行
+          # 此時 .symlinks 已經創建，我們可以安全地修正檔案
+          cat >> "$PODFILE_PATH" << 'HOOK'
+
+          # Pre-install hook to patch super_native_extensions podspec syntax error
+          pre_install do |installer|
+            podspec_path = File.join(File.dirname(__FILE__), '.symlinks/plugins/super_native_extensions/ios/super_native_extensions.podspec')
+            if File.exist?(podspec_path)
+              content = File.read(podspec_path)
+              if content.include?(':execution_position=>')
+                modified = content.gsub(':execution_position=>', ':execution_position =>')
+                File.write(podspec_path, modified)
+                Pod::UI.puts "✅ Patched super_native_extensions.podspec syntax"
+              else
+                Pod::UI.puts "ℹ️  No syntax error found in super_native_extensions.podspec"
+              end
+            else
+              Pod::UI.puts "⚠️  super_native_extensions.podspec not found at #{podspec_path}"
+            end
+          end
+          HOOK
+          
+          echo "📄 Modified Podfile last lines:"
+          tail -10 "$PODFILE_PATH"
+          echo "✅ Podfile pre_install hook injected"
 
       - name: Build iOS App (Unsigned)
         run: |
