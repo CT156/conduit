@@ -1,17 +1,22 @@
 name: Build Unsigned IPA
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # 允許手動點擊按鈕執行
 
 jobs:
   build:
     runs-on: macos-latest
-    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: true
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -19,60 +24,33 @@ jobs:
           channel: 'stable'
           flutter-version: '3.x'
 
-      - name: Install Dependencies
+      - name: Install CocoaPods (Gem)
+        run: |
+          sudo gem install cocoapods
+
+      - name: Install Flutter & Dart Dependencies
         run: |
           flutter pub get
           dart run build_runner build --delete-conflicting-outputs
 
-      - name: Install CocoaPods via Gem
+      - name: Patch super_native_extensions.podspec syntax (if exists)
         run: |
-          brew uninstall --ignore-dependencies cocoapods 2>/dev/null || true
-          brew cleanup 2>/dev/null || true
-          GEM_HOME_DIR="$HOME/.gem-custom"
-          mkdir -p "$GEM_HOME_DIR"
-          GEM_HOME=$GEM_HOME_DIR gem install cocoapods -N --no-document
-          echo "GEM_HOME=$GEM_HOME_DIR" >> $GITHUB_ENV
-          echo "$GEM_HOME_DIR/bin" >> $GITHUB_PATH
-
-      # 解決方案：在 Podfile 中注入 pre_install hook
-      - name: Inject Podfile pre_install hook to patch podspec
-        run: |
-          PODFILE_PATH="ios/Podfile"
-          
-          # 確保 Podfile 存在
-          if [ ! -f "$PODFILE_PATH" ]; then
-            echo "❌ Podfile not found at $PODFILE_PATH"
-            exit 1
+          PODSPEC_PATH="ios/.symlinks/plugins/super_native_extensions/ios/super_native_extensions.podspec"
+          if [ -f "$PODSPEC_PATH" ]; then
+            echo "Patching $PODSPEC_PATH ..."
+            # 修正所有 :key=>value 变成 :key => value
+            sed -i.bak 's/:execution_position=>/:execution_position =>/g' "$PODSPEC_PATH"
+            echo "Patch done. Diff:"
+            diff "$PODSPEC_PATH.bak" "$PODSPEC_PATH" | cat
+          else
+            echo "No super_native_extensions.podspec found, skipping patch."
           fi
-          
-          echo "📄 Original Podfile last lines:"
-          tail -5 "$PODFILE_PATH"
-          
-          # 注入 pre_install hook - 這個 hook 會在解析 podspec 之前執行
-          # 此時 .symlinks 已經創建，我們可以安全地修正檔案
-          cat >> "$PODFILE_PATH" << 'HOOK'
 
-          # Pre-install hook to patch super_native_extensions podspec syntax error
-          pre_install do |installer|
-            podspec_path = File.join(File.dirname(__FILE__), '.symlinks/plugins/super_native_extensions/ios/super_native_extensions.podspec')
-            if File.exist?(podspec_path)
-              content = File.read(podspec_path)
-              if content.include?(':execution_position=>')
-                modified = content.gsub(':execution_position=>', ':execution_position =>')
-                File.write(podspec_path, modified)
-                Pod::UI.puts "✅ Patched super_native_extensions.podspec syntax"
-              else
-                Pod::UI.puts "ℹ️  No syntax error found in super_native_extensions.podspec"
-              end
-            else
-              Pod::UI.puts "⚠️  super_native_extensions.podspec not found at #{podspec_path}"
-            end
-          end
-          HOOK
-          
-          echo "📄 Modified Podfile last lines:"
-          tail -10 "$PODFILE_PATH"
-          echo "✅ Podfile pre_install hook injected"
+      - name: Install CocoaPods Pods
+        run: |
+          cd ios
+          pod install
+          cd ..
 
       - name: Build iOS App (Unsigned)
         run: |
