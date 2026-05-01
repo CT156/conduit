@@ -11,10 +11,9 @@ jobs:
     - name: 检出代码
       uses: actions/checkout@v4
 
-    - name: 安装 Flutter（版本 3.27.0+ 包含 Dart 3.8+）
+    - name: 安装最新稳定 Flutter
       uses: subosito/flutter-action@v2
       with:
-        flutter-version: '3.27.0'
         channel: 'stable'
 
     - name: 检查 Flutter 和 Dart 版本
@@ -22,8 +21,10 @@ jobs:
         flutter --version
         dart --version
 
-    - name: 获取依赖
-      run: flutter pub get
+    - name: 禁用分析和获取依赖
+      run: |
+        flutter config --no-analytics
+        flutter pub get --offline || flutter pub get
 
     - name: 构建 iOS IPA
       run: |
