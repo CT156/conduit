@@ -27,26 +27,38 @@ jobs:
       - name: Install CocoaPods
         run: sudo gem install cocoapods
 
-      - name: Install Dependencies
+      - name: Install Flutter deps
         run: |
           flutter pub get
           dart run build_runner build --delete-conflicting-outputs
 
-      # ★★ 强制等待建立 symlinks 目录，确保 podspec 存在
-      - name: Pre-generate iOS Plugins (symlinks)
+      # 强制提前生成 symlinks 和 Podspec 文件，确保 patch 步骤不会失效
+      - name: Pre-generate iOS symlinks and podspecs
         run: |
           flutter build ios --no-codesign --simulator || true
 
-      - name: Patch super_native_extensions.podspec syntax
+      # Patch Ruby 语法
+      - name: Patch super_native_extensions.podspec syntax (自动修复 Ruby podspec 语法)
         run: |
-          PODSPEC="ios/.symlinks/plugins/super_native_extensions/ios/super_native_extensions.podspec"
+          SPECDIR="ios/.symlinks/plugins/super_native_extensions/ios"
+          PODSPEC="$SPECDIR/super_native_extensions.podspec"
           if [ -f "$PODSPEC" ]; then
-            echo "✅ Found $PODSPEC, begin patch..."
+            echo "🚑 Patching podspec Ruby syntax: $PODSPEC"
             sed -i.bak 's/:execution_position=>/:execution_position =>/g' "$PODSPEC"
-            echo "📝 Patch diff ↓↓↓"
-            diff "$PODSPEC.bak" "$PODSPEC" || echo "No diff; already patched"
+            diff "$PODSPEC.bak" "$PODSPEC" || echo 'Patch already applied or nothing changed.'
           else
-            echo "⚪️ $PODSPEC 不存在，跳过修复。"
+            echo "⚪️ $PODSPEC not found, patch skipped."
+          fi
+
+      - name: Patch connectivity_plus for older Xcode
+        run: |
+          SWIFT_PATH="$HOME/.pub-cache/hosted/pub.dev/connectivity_plus-7.1.1/ios/connectivity_plus/Sources/connectivity_plus/PathMonitorConnectivityProvider.swift"
+          if grep -q "isUltraConstrained" "$SWIFT_PATH" 2>/dev/null; then
+            echo "🩹 Removing isUltraConstrained usage for compatibility..."
+            sed -i.bak '/isUltraConstrained/d' "$SWIFT_PATH"
+            grep ultraConstrained "$SWIFT_PATH" || echo "已移除 isUltraConstrained"
+          else
+            echo "connectivity_plus Swift 源码无 isUltraConstrained 字样，跳过补丁。"
           fi
 
       - name: Install CocoaPods Pods
