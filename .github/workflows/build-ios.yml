@@ -11,11 +11,16 @@ jobs:
     - name: 检出代码
       uses: actions/checkout@v4
 
-    - name: 安装 Flutter
+    - name: 安装 Flutter（版本 3.24.0 包含 Dart 3.8.0+）
       uses: subosito/flutter-action@v2
       with:
-        flutter-version: '3.22.0'  # 根据你项目实际需要调整版本
+        flutter-version: '3.24.0'
         channel: 'stable'
+
+    - name: 检查 Flutter 和 Dart 版本
+      run: |
+        flutter --version
+        dart --version
 
     - name: 获取依赖
       run: flutter pub get
