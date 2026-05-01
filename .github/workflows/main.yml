@@ -12,24 +12,33 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2' # 強制切換到兼容舊語法的 Ruby 3.2
+          bundler-cache: true
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
           flutter-version: '3.x'
-          
+
+      - name: Reinstall CocoaPods via Gem
+        run: |
+          # 卸載或繞過 Homebrew 版本的 CocoaPods，改用 Ruby 3.2 環境下的 Gem 版本
+          sudo gem install cocoapods
+          # 確保 pod 命令指向的是剛剛裝好的這個
+          echo "$(gem environment gemdir)/bin" >> $GITHUB_PATH
+
       - name: Install Dependencies
         run: |
           flutter pub get
           dart run build_runner build --delete-conflicting-outputs
 
-      - name: Patch Ruby 3.3 syntax in Pub Cache
-        run: |
-          # 直接去全域快取目錄，找到那個檔案並修正語法錯誤 (強制補上空格)
-          find ~/.pub-cache -name "super_native_extensions.podspec" -exec sed -i '' 's/:execution_position=>/:execution_position =>/g' {} +
-
       - name: Build iOS App (Unsigned)
         run: |
+          # 這裡會自動使用我們新裝的、基於 Ruby 3.2 的 CocoaPods
           flutter build ios --release --no-codesign
 
       - name: Package IPA
