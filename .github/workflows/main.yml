@@ -17,18 +17,16 @@ jobs:
         with:
           channel: 'stable'
           flutter-version: '3.x'
-
-      # --- 這是新的終極解法：強制使用 Ruby 3.2 ---
-      - name: Setup Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: '3.2'
-      # ----------------------------------------
-
+          
       - name: Install Dependencies
         run: |
           flutter pub get
           dart run build_runner build --delete-conflicting-outputs
+
+      - name: Patch Ruby 3.3 syntax in Pub Cache
+        run: |
+          # 直接去全域快取目錄，找到那個檔案並修正語法錯誤 (強制補上空格)
+          find ~/.pub-cache -name "super_native_extensions.podspec" -exec sed -i '' 's/:execution_position=>/:execution_position =>/g' {} +
 
       - name: Build iOS App (Unsigned)
         run: |
