@@ -1,7 +1,7 @@
 name: Build Unsigned IPA
 
 on:
-  workflow_dispatch: # 允許手動點擊按鈕執行
+  workflow_dispatch:
 
 jobs:
   build:
@@ -24,26 +24,29 @@ jobs:
           channel: 'stable'
           flutter-version: '3.x'
 
-      - name: Install CocoaPods (Gem)
-        run: |
-          sudo gem install cocoapods
+      - name: Install CocoaPods
+        run: sudo gem install cocoapods
 
-      - name: Install Flutter & Dart Dependencies
+      - name: Install Dependencies
         run: |
           flutter pub get
           dart run build_runner build --delete-conflicting-outputs
 
-      - name: Patch super_native_extensions.podspec syntax (if exists)
+      # ★★ 强制等待建立 symlinks 目录，确保 podspec 存在
+      - name: Pre-generate iOS Plugins (symlinks)
         run: |
-          PODSPEC_PATH="ios/.symlinks/plugins/super_native_extensions/ios/super_native_extensions.podspec"
-          if [ -f "$PODSPEC_PATH" ]; then
-            echo "Patching $PODSPEC_PATH ..."
-            # 修正所有 :key=>value 变成 :key => value
-            sed -i.bak 's/:execution_position=>/:execution_position =>/g' "$PODSPEC_PATH"
-            echo "Patch done. Diff:"
-            diff "$PODSPEC_PATH.bak" "$PODSPEC_PATH" | cat
+          flutter build ios --no-codesign --simulator || true
+
+      - name: Patch super_native_extensions.podspec syntax
+        run: |
+          PODSPEC="ios/.symlinks/plugins/super_native_extensions/ios/super_native_extensions.podspec"
+          if [ -f "$PODSPEC" ]; then
+            echo "✅ Found $PODSPEC, begin patch..."
+            sed -i.bak 's/:execution_position=>/:execution_position =>/g' "$PODSPEC"
+            echo "📝 Patch diff ↓↓↓"
+            diff "$PODSPEC.bak" "$PODSPEC" || echo "No diff; already patched"
           else
-            echo "No super_native_extensions.podspec found, skipping patch."
+            echo "⚪️ $PODSPEC 不存在，跳过修复。"
           fi
 
       - name: Install CocoaPods Pods
