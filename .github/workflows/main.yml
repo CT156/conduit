@@ -21,6 +21,12 @@ jobs:
           flutter pub get
           dart run build_runner build --delete-conflicting-outputs
 
+      - name: Patch broken podspec for Ruby 3.3 compatibility
+        run: |
+          # 修復 super_native_extensions 的 Ruby 語法錯誤
+          # 將 ':execution_position=> :before_compile' 替換為新式語法 'execution_position: :before_compile'
+          find . -name "super_native_extensions.podspec" -exec sed -i '' 's/:execution_position=> :before_compile/execution_position: :before_compile/g' {} +
+  
       - name: Build iOS App (Unsigned)
         run: |
           # 編譯為不帶簽名的 Release 模式
