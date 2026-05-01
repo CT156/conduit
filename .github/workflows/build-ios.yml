@@ -11,31 +11,24 @@ jobs:
     - name: 检出代码
       uses: actions/checkout@v4
 
-    - name: 安装 CocoaPods
-      run: sudo gem install cocoapods
+    - name: 安装 Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.22.0'  # 根据你项目实际需要调整版本
+        channel: 'stable'
 
-    - name: 安装依赖
-      run: pod install
+    - name: 获取依赖
+      run: flutter pub get
 
-    - name: 构建 archive
+    - name: 构建 iOS IPA
       run: |
-        xcodebuild \
-          -workspace Conduit.xcworkspace \
-          -scheme Conduit \
-          -configuration Release \
-          -archivePath $PWD/build/Conduit.xcarchive \
-          clean archive
-
-    - name: 导出 IPA（适合 Sidestore）
-      run: |
-        xcodebuild \
-          -exportArchive \
-          -archivePath $PWD/build/Conduit.xcarchive \
-          -exportPath $PWD/build/ipa \
-          -exportOptionsPlist ./ExportOptions.plist
+        flutter build ipa \
+          --release \
+          --export-method ad-hoc \
+          --no-codesign
 
     - name: 上传 IPA 文件
       uses: actions/upload-artifact@v4
       with:
         name: conduit-ipa
-        path: build/ipa/*.ipa
+        path: build/ios/ipa/*.ipa
