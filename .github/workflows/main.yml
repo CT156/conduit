@@ -6,17 +6,12 @@ on:
 jobs:
   build:
     runs-on: macos-latest
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           submodules: recursive
-
-      - name: Setup Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: '3.2' # 強制切換到兼容舊語法的 Ruby 3.2
-          bundler-cache: true
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -24,29 +19,77 @@ jobs:
           channel: 'stable'
           flutter-version: '3.x'
 
-      - name: Reinstall CocoaPods via Gem
-        run: |
-          # 卸載或繞過 Homebrew 版本的 CocoaPods，改用 Ruby 3.2 環境下的 Gem 版本
-          sudo gem install cocoapods
-          # 確保 pod 命令指向的是剛剛裝好的這個
-          echo "$(gem environment gemdir)/bin" >> $GITHUB_PATH
-
+      # 步驟1: 安裝 Flutter 依賴
       - name: Install Dependencies
         run: |
           flutter pub get
           dart run build_runner build --delete-conflicting-outputs
 
+      # 步驟2: 重構 CocoaPods 環境 (繞過 Homebrew 限制)
+      - name: Install CocoaPods via Gem (bypass Homebrew Ruby lock)
+        run: |
+          # 解除 Homebrew 安裝的 CocoaPods 可能造成的連結干擾
+          brew uninstall --ignore-dependencies cocoapods 2>/dev/null || true
+          brew cleanup 2>/dev/null || true
+
+          # 建立一個自訂的 Gem 安裝目錄，避免與系統衝突 (macOS 15+ 權限控制更嚴格)
+          GEM_HOME_DIR="$HOME/.gem-custom"
+          mkdir -p "$GEM_HOME_DIR"
+
+          # 安裝 CocoaPods 到自訂目錄 (強制使用 Ruby 3.3 能運行的版本，但我們需要的是其依賴兼容性)
+          # 注意: 這裡我們直接安裝最新版 CocoaPods，它本身就支援 Ruby 3.3。
+          # 核心問題是套件的 podspec 語法，而不是 CocoaPods 本身。
+          # 安裝命令: GEM_HOME=$GEM_HOME_DIR gem install cocoapods -N
+          GEM_HOME=$GEM_HOME_DIR gem install cocoapods -N --no-document
+
+          # 設定環境變數，讓後續步驟知道去哪裡找 pod 執行檔 (寫入 GITHUB_ENV)
+          echo "GEM_HOME=$GEM_HOME_DIR" >> $GITHUB_ENV
+          echo "$GEM_HOME_DIR/bin" >> $GITHUB_PATH
+
+        # 環境準備：確保後續步驟使用我們安裝的 Ruby 和 Gems
+        shell: bash
+
+      # 步驟3: 修正 super_native_extensions 的語法錯誤 (在 pod install 之前)
+      - name: Patch Ruby 3.3 syntax in Pub Cache
+        run: |
+          echo "🔍 Searching for super_native_extensions.podspec in global pub cache..."
+          
+          # 使用 find 精確查找檔案，為了更安全，只修正我們需要的套件
+          TARGET_FILE=$(find ~/.pub-cache -path "*/super_native_extensions*/super_native_extensions.podspec" -print -quit)
+          
+          if [ -n "$TARGET_FILE" ]; then
+            echo "✅ Found podspec at: $TARGET_FILE"
+            # 顯示修改前的內容 (Debug)
+            grep -n "execution_position" "$TARGET_FILE" || true
+            # 執行修正: 在 :execution_position=> 的冒號與箭頭之間強制加上空格
+            sed -i '' 's/:execution_position=>/:execution_position =>/g' "$TARGET_FILE"
+            echo "✅ Patch applied successfully."
+            # 顯示修改後的內容 (驗證)
+            grep -n "execution_position" "$TARGET_FILE" || true
+          else
+            echo "❌ Could not find super_native_extensions.podspec in cache."
+            echo "❗ This might happen if flutter pub get failed or the package is cached differently."
+            echo "💡 Falling back to broader search..."
+            find ~/.pub-cache -name "super_native_extensions.podspec" -exec sed -i '' 's/:execution_position=>/:execution_position =>/g' {} \;
+            echo "✅ Fallback patch attempted."
+          fi
+
+      # 步驟4: 建構 Release Framework (但跳過簽證)
       - name: Build iOS App (Unsigned)
         run: |
-          # 這裡會自動使用我們新裝的、基於 Ruby 3.2 的 CocoaPods
+          # 強制使用我們自己安裝的 pod 版本，並指定 Homebrew 的 Ruby 不要干擾 (理論上已移除)
+          # flutter build 內部會呼叫 pod install，它會優先使用 PATH 中的 pod
           flutter build ios --release --no-codesign
 
+      # 步驟5: 打包 IPA
       - name: Package IPA
         run: |
           mkdir -p Payload
+          # 注意: Flutter 3.x 的預設輸出目錄
           cp -r build/ios/iphoneos/Runner.app Payload/
           zip -r Conduit_Unsigned.ipa Payload
 
+      # 步驟6: 上傳產物
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
