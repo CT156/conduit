@@ -38,29 +38,32 @@ jobs:
       - name: Generate code (build_runner)
         run: dart run build_runner build --delete-conflicting-outputs
 
-      # 关键：Ruby 3.3 严格模式下，hash 键值对的 => 前面必须有空格
-      # 只修复空格，不要在 SCRIPT 后面加任何字符！
-      - name: Fix super_native_extensions podspec
+      # 先生成 symlinks，然后直接修复 symlinks 下的 podspec
+      # 因为 pod install 实际读的是 .symlinks 下的文件，不是 pub cache
+      - name: Generate iOS symlinks
+        run: flutter build ios --config-only --no-codesign || true
+
+      - name: Fix super_native_extensions podspec in symlinks
         run: |
-          PODSPEC=$(find ~/.pub-cache/git -path "*/super_native_extensions*/ios/super_native_extensions.podspec" -type f 2>/dev/null | head -n 1)
+          PODSPEC="ios/.symlinks/plugins/super_native_extensions/ios/super_native_extensions.podspec"
           
-          if [ -z "$PODSPEC" ]; then
-            echo "Warning: podspec not found"
-            exit 0
+          if [ ! -f "$PODSPEC" ]; then
+            echo "Error: $PODSPEC not found"
+            # 尝试搜索
+            find ios -name "super_native_extensions.podspec" -type f 2>/dev/null
+            exit 1
           fi
           
           echo "Found: $PODSPEC"
+          echo "Before fix:"
+          grep -n "execution_position" "$PODSPEC" || true
           
-          # 仅修复 => 前无空格的问题
+          # 修复 => 前无空格
           sed -i.bak 's/:execution_position=>/:execution_position =>/g' "$PODSPEC"
           rm -f "$PODSPEC.bak"
           
-          echo "Patched. Verifying:"
+          echo "After fix:"
           grep -n "execution_position" "$PODSPEC" || true
-
-      # Xcode 16.3 原生支持 isUltraConstrained，不需要修复 connectivity_plus
-      - name: Generate iOS config & symlinks
-        run: flutter build ios --config-only --no-codesign
 
       - name: Cache CocoaPods
         uses: actions/cache@v4
