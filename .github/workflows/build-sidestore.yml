@@ -38,19 +38,32 @@ jobs:
       - name: Generate code (build_runner)
         run: dart run build_runner build --delete-conflicting-outputs
 
-      # 关键：在 flutter 创建 symlinks / 运行 pod install 之前，先修好 pub cache 里的原始文件
-      - name: Fix super_native_extensions podspec syntax
+      # 关键修复：super_native_extensions 的 podspec 有 Ruby 语法问题
+      # 问题1: :execution_position=> 缺少空格
+      # 问题2: SCRIPT heredoc 结束标记后面缺少逗号（Ruby 3.3 严格模式报错）
+      - name: Fix super_native_extensions podspec
         run: |
-          echo "Patching podspec files in pub cache..."
-          find -L ~/.pub-cache -name "*.podspec" -type f 2>/dev/null | while read -r f; do
-            if grep -q ':execution_position=>' "$f" 2>/dev/null; then
-              echo "  Fixed: $f"
-              sed -i.bak 's/:execution_position=>/:execution_position =>/g' "$f"
-              rm -f "$f.bak"
-            fi
-          done
+          PODSPEC=$(find ~/.pub-cache/git -path "*/super_native_extensions*/ios/super_native_extensions.podspec" -type f 2>/dev/null | head -n 1)
+          
+          if [ -z "$PODSPEC" ]; then
+            echo "Warning: super_native_extensions podspec not found in pub cache"
+            exit 0
+          fi
+          
+          echo "Found podspec: $PODSPEC"
+          
+          # 修复1: 确保 => 前面有空格
+          sed -i.bak 's/:execution_position=>/:execution_position =>/g' "$PODSPEC"
+          
+          # 修复2: 在 SCRIPT heredoc 结束标记和下一行的 :execution_position 之间插入逗号
+          # Ruby 3.3 要求 hash 的键值对之间必须用逗号分隔
+          perl -i.bak -0777 -pe 's/SCRIPT(\s*\n\s*):execution_position\s*=>/SCRIPT,$1:execution_position =>/g' "$PODSPEC"
+          
+          rm -f "$PODSPEC.bak"
+          
+          echo "Podspec patched. Verifying around execution_position:"
+          grep -n -A1 -B1 "execution_position" "$PODSPEC" || true
 
-      # 提前生成 iOS 配置和 symlinks；此时 podspec 已修复，pod install 应该直接成功
       - name: Generate iOS config & symlinks
         run: flutter build ios --config-only --no-codesign
 
