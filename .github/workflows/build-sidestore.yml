@@ -38,23 +38,10 @@ jobs:
       - name: Generate code (build_runner)
         run: dart run build_runner build --delete-conflicting-outputs
 
-      # 提前生成 iOS 配置和 symlinks，确保后续 find 能搜到插件
-      - name: Generate iOS config & symlinks
-        run: flutter build ios --config-only --no-codesign || true
-
-      # 关键修复：必须使用 -L 跟随符号链接，因为 ios/.symlinks 下全是链接
-      - name: Fix plugin podspec Ruby syntax
+      # 关键：在 flutter 创建 symlinks / 运行 pod install 之前，先修好 pub cache 里的原始文件
+      - name: Fix super_native_extensions podspec syntax
         run: |
-          echo "Patching podspec files in ios/.symlinks ..."
-          find -L ios -name "*.podspec" -type f 2>/dev/null | while read -r f; do
-            if grep -q ':execution_position=>' "$f" 2>/dev/null; then
-              echo "  Fixed: $f"
-              sed -i.bak 's/:execution_position=>/:execution_position =>/g' "$f"
-              rm -f "$f.bak"
-            fi
-          done
-
-          echo "Patching podspec files in pub cache ..."
+          echo "Patching podspec files in pub cache..."
           find -L ~/.pub-cache -name "*.podspec" -type f 2>/dev/null | while read -r f; do
             if grep -q ':execution_position=>' "$f" 2>/dev/null; then
               echo "  Fixed: $f"
@@ -63,16 +50,9 @@ jobs:
             fi
           done
 
-      # 修复 connectivity_plus 在旧版 Xcode / 新 API 上的兼容性问题
-      - name: Fix connectivity_plus Swift compatibility
-        run: |
-          find -L ~/.pub-cache -path "*/connectivity_plus*/PathMonitorConnectivityProvider.swift" -type f 2>/dev/null | while read -r f; do
-            if grep -q "isUltraConstrained" "$f" 2>/dev/null; then
-              echo "Removing isUltraConstrained from: $f"
-              sed -i.bak '/isUltraConstrained/d' "$f"
-              rm -f "$f.bak"
-            fi
-          done
+      # 提前生成 iOS 配置和 symlinks；此时 podspec 已修复，pod install 应该直接成功
+      - name: Generate iOS config & symlinks
+        run: flutter build ios --config-only --no-codesign
 
       - name: Cache CocoaPods
         uses: actions/cache@v4
@@ -83,12 +63,6 @@ jobs:
           key: ${{ runner.os }}-pods-${{ hashFiles('ios/Podfile.lock', 'ios/Podfile', 'pubspec.lock') }}
           restore-keys: |
             ${{ runner.os }}-pods-
-
-      - name: Install CocoaPods dependencies
-        run: |
-          cd ios
-          pod install --repo-update
-          cd ..
 
       - name: Build iOS App (Unsigned)
         run: flutter build ios --release --no-codesign
