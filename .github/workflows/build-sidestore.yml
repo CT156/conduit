@@ -38,23 +38,39 @@ jobs:
       - name: Generate code (build_runner)
         run: dart run build_runner build --delete-conflicting-outputs
 
-      # 某些插件的 podspec 用了旧 Ruby hash 语法，在较新 Ruby 版本下会解析失败
-      - name: Fix plugin podspec syntax issues
+      # 提前生成 iOS 配置和 symlinks，确保后续 find 能搜到插件
+      - name: Generate iOS config & symlinks
+        run: flutter build ios --config-only --no-codesign || true
+
+      # 关键修复：必须使用 -L 跟随符号链接，因为 ios/.symlinks 下全是链接
+      - name: Fix plugin podspec Ruby syntax
         run: |
-          find ios -name "*.podspec" -type f 2>/dev/null | while read -r f; do
+          echo "Patching podspec files in ios/.symlinks ..."
+          find -L ios -name "*.podspec" -type f 2>/dev/null | while read -r f; do
             if grep -q ':execution_position=>' "$f" 2>/dev/null; then
-              echo "Fixing Ruby syntax in: $f"
-              sed -i '' 's/:execution_position=>/:execution_position =>/g' "$f"
+              echo "  Fixed: $f"
+              sed -i.bak 's/:execution_position=>/:execution_position =>/g' "$f"
+              rm -f "$f.bak"
+            fi
+          done
+
+          echo "Patching podspec files in pub cache ..."
+          find -L ~/.pub-cache -name "*.podspec" -type f 2>/dev/null | while read -r f; do
+            if grep -q ':execution_position=>' "$f" 2>/dev/null; then
+              echo "  Fixed: $f"
+              sed -i.bak 's/:execution_position=>/:execution_position =>/g' "$f"
+              rm -f "$f.bak"
             fi
           done
 
       # 修复 connectivity_plus 在旧版 Xcode / 新 API 上的兼容性问题
       - name: Fix connectivity_plus Swift compatibility
         run: |
-          find ~/.pub-cache -path "*/connectivity_plus*/PathMonitorConnectivityProvider.swift" -type f 2>/dev/null | while read -r f; do
+          find -L ~/.pub-cache -path "*/connectivity_plus*/PathMonitorConnectivityProvider.swift" -type f 2>/dev/null | while read -r f; do
             if grep -q "isUltraConstrained" "$f" 2>/dev/null; then
               echo "Removing isUltraConstrained from: $f"
-              sed -i '' '/isUltraConstrained/d' "$f"
+              sed -i.bak '/isUltraConstrained/d' "$f"
+              rm -f "$f.bak"
             fi
           done
 
