@@ -1,0 +1,41 @@
+name: Build iOS IPA for Sidestore
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+
+    - name: 安装 CocoaPods
+      run: sudo gem install cocoapods
+
+    - name: 安装依赖
+      run: pod install
+
+    - name: 构建 archive
+      run: |
+        xcodebuild \
+          -workspace Conduit.xcworkspace \
+          -scheme Conduit \
+          -configuration Release \
+          -archivePath $PWD/build/Conduit.xcarchive \
+          clean archive
+
+    - name: 导出 IPA（适合 Sidestore）
+      run: |
+        xcodebuild \
+          -exportArchive \
+          -archivePath $PWD/build/Conduit.xcarchive \
+          -exportPath $PWD/build/ipa \
+          -exportOptionsPlist ./ExportOptions.plist
+
+    - name: 上传 IPA 文件
+      uses: actions/upload-artifact@v4
+      with:
+        name: conduit-ipa
+        path: build/ipa/*.ipa
